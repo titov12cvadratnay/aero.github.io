@@ -24,6 +24,34 @@
         // Инициализация Firebase
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
+async function sendMessage(userName, messageText) {
+
+    try {
+
+      // addDoc автоматически создает документ с уникальным ID в коллекции "messages"
+
+      const docRef = await addDoc(collection(db, "messages"), {
+
+        name: userName,
+
+        text: messageText,
+
+        timestamp: new Date() // Полезно для сортировки и настройки TTL-удаления
+
+      });
+
+      
+
+      console.log("Сообщение отправлено! Автоматический ID:", docRef.id);
+
+    } catch (error) {
+
+      console.error("Ошибка при отправке сообщения: ", error);
+
+    }
+
+  }
+
 
         async function testDatabaseConnection() {
             const statusDiv = document.getElementById("status");
