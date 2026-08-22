@@ -2,15 +2,160 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://www.gstatic.com; connect-src 'self' https://firestore.googleapis.com https://firebaseinstallations.googleapis.com; img-src 'self' https://www.google.com;">
-
-    <title>Проверка связи с Firebase</title>
+    <title>Чат</title>
 </head>
 <body>
-    <h1>Проверка подключения к Firestore</h1>
-    <div id="status">Подключение...</div>
+    <div id="warning" style="display:none; color:#f00; text-align:center;">Этот чат автоматически удалится сегодня в 3:00 ночи.</div>
+    
+    <h2 style="text-align:center;">Исчезающий чат</h2>
+    
+    <div id="chat" style="border:1px solid #444; min-height:200px; padding:10px; margin-bottom:10px; background:#222;"></div>
+    
+    <form id="form">
+        <input type="text" id="nameInput" placeholder="Имя..." required style="width:25%; display:block; margin-bottom:5px; padding:5px; font-size:16px;">
+        <input type="text" id="textInput" placeholder="Сообщение..." required style="width:70%; display:block; margin-bottom:5px; padding:5px; font-size:16px;">
+        <button type="submit" style="padding:5px 10px; font-size:16px;">Отправить</button>
+    </form>
 
-    <!-- Подключаем внешний файл с кодом -->
-    <script type="module" src="app.js"></script>
+    <!-- Подключаем Firebase из CDN -->
+    <script src="https://www.gstatic.com/firebasejs/10.14.2/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.14.2/firebase-firestore-compat.js"></script>
+
+    <script>
+        // Модуль времени (остается неизменным)
+        const Time = {
+            getTarget() {
+                const now = new Date();
+                return new Date(now.getFullYear(), now.getMonth(), now.getDate(), 3, 0, 0);
+            },
+            isNight() {
+                const now = new Date();
+                const target = this.getTarget();
+                return now >= target;
+            },
+            format(ms) {
+                const m = Math.floor(ms / 60000);
+                const s = Math.floor((ms % 60000) / 1000);
+                return `${m} мин ${s} сек`;
+            }
+        };
+
+        // Модуль UI (остается неизменным)
+        const UI = {
+            chat: document.getElementById('chat'),
+            warning: document.getElementById('warning'),
+            form: document.getElementById('form'),
+            nameInput: document.getElementById('nameInput'),
+            textInput: document.getElementById('textInput'),
+            
+            render(messages) {
+                if (Time.isNight()) {
+                    this.chat.innerHTML = '<p><em>Чат очищен до завтра.</em></p>';
+                    return;
+                }
+                
+                let html = '';
+                messages.forEach(msg => {
+                    html += `<strong>${msg.name}:</strong> ${msg.text}<br>`;
+                });
+                this.chat.innerHTML = html || '<p><em>Пусто. Напиши что-нибудь.</em></p>';
+                this.chat.scrollTop = this.chat.scrollHeight;
+            },
+            
+            showWarning() {
+                if (!Time.isNight()) {
+                    this.warning.style.display = 'block';
+                }
+            }
+        };
+
+        /* === НАСТРОЙКА FIREBASE === */
+        const firebaseConfig = {
+          apiKey: "ВАШ_API_KEY",
+          authDomain: "ВАШ_ПРОЕКТ.firebaseapp.com",
+          projectId: "ВАШ_ПРОЕКТ",
+          storageBucket: "ВАШ_ПРОЕКТ.appspot.com",
+          messagingSenderId: "ВАШ_ID",
+          appId: "ВАШЕ_ПРИЛОЖЕНИЕ"
+        };
+        
+        // Инициализация
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+        const messagesCol = db.collection('messages');
+        /* ======================== */
+
+        // Модуль данных (теперь это Cloud Firestore)
+        const Store = {
+            unsubscribe: null,
+            
+            bind(onDataChange) {
+                // Слушаем базу в реальном времени
+                this.unsubscribe = messagesCol.orderBy('createdAt', 'asc').onSnapshot(snapshot => {
+                    const data = [];
+                    snapshot.forEach(doc => {
+                        const d = doc.data();
+                        data.push({ id: doc.id, name: d.name, text: d.text });
+                    });
+                    onDataChange(data);
+                });
+            },
+            
+            unbind() {
+                if (this.unsubscribe) this.unsubscribe();
+            },
+            
+            add(name, text) {
+                messagesCol.add({
+                    name: name,
+                    text: text,
+                    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                });
+            }
+        };
+
+        // Инициализация приложения
+        UI.showWarning();
+        
+        // Подписываемся на изменения в базе
+        Store.bind(UI.render);
+
+        // Отправка сообщения
+        UI.form.addEventListener('submit', (e) => {
+            e.preventDefault();
+            if (Time.isNight()) return;
+            
+            const name = UI.nameInput.value.trim();
+            const text = UI.textInput.value.trim();
+            
+            if (name && text) {
+                Store.add(name, text);
+                UI.nameInput.value = '';
+                UI.textInput.value = '';
+            }
+        });
+
+        // Таймер удаления сообщений из базы
+        function scheduleDeletion() {
+            const delay = Time.getTarget() - new Date();
+            
+            setTimeout(() => {
+                // Если сейчас ночь — вычищаем всю коллекцию
+                messagesCol.get().then(querySnapshot => {
+                    querySnapshot.forEach(doc => {
+                        doc.ref.delete();
+                    });
+                    console.log("Коллекция очищена");
+                }).catch(err => {
+                    console.error("Ошибка при очистке:", err);
+                });
+                
+                // Перезапускаем таймер на завтрашние 3 часа
+                scheduleDeletion(); 
+            }, delay > 0 ? delay : 86400000 + delay);
+        }
+        
+        scheduleDeletion();
+    </script>
 </body>
 </html>
